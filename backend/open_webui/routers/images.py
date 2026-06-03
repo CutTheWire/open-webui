@@ -13,15 +13,15 @@ from typing import Optional
 from urllib.parse import quote, urlparse
 
 import aiohttp
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse
 from open_webui.config import (
     CACHE_DIR,
     IMAGE_AUTO_SIZE_MODELS_REGEX_PATTERN,
     IMAGE_URL_RESPONSE_MODELS_REGEX_PATTERN,
 )
 from open_webui.constants import ERROR_MESSAGES
-from open_webui.env import AIOHTTP_CLIENT_ALLOW_REDIRECTS, AIOHTTP_CLIENT_SESSION_SSL, ENABLE_FORWARD_USER_INFO_HEADERS
+from open_webui.env import AIOHTTP_CLIENT_ALLOW_REDIRECTS, AIOHTTP_CLIENT_SESSION_SSL, ENABLE_FORWARD_USER_INFO_HEADERS, DATA_DIR
 from open_webui.internal.db import get_async_session
 from open_webui.models.chats import Chats
 from open_webui.retrieval.web.utils import validate_url
@@ -47,6 +47,10 @@ log = logging.getLogger(__name__)
 # is generated here be honest about what it shows.
 IMAGE_CACHE_DIR = CACHE_DIR / 'image' / 'generations'
 IMAGE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+# Image repository directory
+IMG_DIR = DATA_DIR / 'img'
+IMG_DIR.mkdir(parents=True, exist_ok=True)
 
 router = APIRouter()
 
@@ -1123,3 +1127,210 @@ async def image_edits(
             error = e.message
 
         raise HTTPException(status_code=400, detail=ERROR_MESSAGES.DEFAULT(error))
+
+
+# ─────────────────────────────────────────────────────────────────
+# Image Repository APIs (data/img folder)
+# ─────────────────────────────────────────────────────────────────
+
+
+@router.get('/repository/list')
+async def list_images():
+    """List all images in the repository."""
+    try:
+        if not IMG_DIR.exists():
+            return {'images': []}
+        
+        images = []
+        for file in IMG_DIR.iterdir():
+            if file.is_file() and file.suffix.lower() in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']:
+                images.append({
+                    'filename': file.name,
+                    'size': file.stat().st_size,
+                    'created': file.stat().st_ctime,
+                })
+        
+        return {'images': sorted(images, key=lambda x: x['filename'])}
+    except Exception as e:
+        log.error(f'Error listing images: {e}')
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get('/repository/{filename}')
+async def serve_image(filename: str):
+    """Serve an image from the repository."""
+    try:
+        # Prevent directory traversal attacks
+        if '..' in filename or '/' in filename or '\\' in filename:
+            raise HTTPException(status_code=400, detail='Invalid filename')
+        
+        file_path = IMG_DIR / filename
+        
+        if not file_path.exists() or not file_path.is_file():
+            raise HTTPException(status_code=404, detail='Image not found')
+        
+        # Check if file is in IMG_DIR (prevent directory traversal)
+        if file_path.resolve().parent != IMG_DIR.resolve():
+            raise HTTPException(status_code=400, detail='Invalid file path')
+        
+        return FileResponse(
+            path=file_path,
+            media_type=mimetypes.guess_type(file_path)[0] or 'image/jpeg'
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f'Error serving image {filename}: {e}')
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post('/repository/upload')
+async def upload_image_to_repository(file: UploadFile = File(...), user=Depends(get_verified_user)):
+    """Upload an image to the repository."""
+    try:
+        # Check file type
+        if not file.content_type or not file.content_type.startswith('image/'):
+            raise HTTPException(status_code=400, detail='File must be an image')
+        
+        # Check filename extension
+        if not file.filename:
+            raise HTTPException(status_code=400, detail='Filename is required')
+        
+        file_ext = Path(file.filename).suffix.lower()
+        if file_ext not in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']:
+            raise HTTPException(status_code=400, detail='Unsupported image format')
+        
+        # Generate unique filename to prevent overwriting
+        unique_filename = f'{uuid.uuid4()}{file_ext}'
+        file_path = IMG_DIR / unique_filename
+        
+        # Read and save file
+        content = await file.read()
+        
+        # Check file size (limit to 50MB)
+        if len(content) > 50 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail='File size exceeds 50MB limit')
+        
+        with open(file_path, 'wb') as f:
+            f.write(content)
+        
+        log.info(f'User {user.id} uploaded image: {unique_filename}')
+        
+        return {
+            'filename': unique_filename,
+            'original_filename': file.filename,
+            'size': len(content),
+            'url': f'/api/v1/images/repository/{unique_filename}'
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f'Error uploading image: {e}')
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete('/repository/{filename}')
+async def delete_image_from_repository(filename: str, user=Depends(get_admin_user)):
+    """Delete an image from the repository (admin only)."""
+    try:
+        # Prevent directory traversal attacks
+        if '..' in filename or '/' in filename or '\\' in filename:
+            raise HTTPException(status_code=400, detail='Invalid filename')
+        
+        file_path = IMG_DIR / filename
+        
+        if not file_path.exists() or not file_path.is_file():
+            raise HTTPException(status_code=404, detail='Image not found')
+        
+        # Check if file is in IMG_DIR (prevent directory traversal)
+        if file_path.resolve().parent != IMG_DIR.resolve():
+            raise HTTPException(status_code=400, detail='Invalid file path')
+        
+        file_path.unlink()
+        log.info(f'Admin {user.id} deleted image: {filename}')
+        
+        return {'status': 'success', 'message': 'Image deleted successfully'}
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f'Error deleting image {filename}: {e}')
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+class RenameImageForm(BaseModel):
+    new_filename: str
+
+
+@router.post('/repository/{filename}/rename')
+async def rename_image_in_repository(filename: str, form_data: RenameImageForm, user=Depends(get_verified_user)):
+    """Rename an image in the repository."""
+    try:
+        # Prevent directory traversal attacks in old filename
+        if '..' in filename or '/' in filename or '\\' in filename:
+            raise HTTPException(status_code=400, detail='Invalid filename')
+        
+        # Validate new filename
+        new_filename = form_data.new_filename.strip()
+        if not new_filename:
+            raise HTTPException(status_code=400, detail='New filename cannot be empty')
+        
+        if '..' in new_filename or '/' in new_filename or '\\' in new_filename:
+            raise HTTPException(status_code=400, detail='Invalid new filename')
+        
+        # Check if new filename has valid image extension
+        file_ext = Path(new_filename).suffix.lower()
+        if file_ext not in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']:
+            raise HTTPException(status_code=400, detail='Unsupported image format')
+        
+        old_file_path = IMG_DIR / filename
+        new_file_path = IMG_DIR / new_filename
+        
+        # Check if old file exists
+        if not old_file_path.exists() or not old_file_path.is_file():
+            raise HTTPException(status_code=404, detail='Image not found')
+        
+        # Check if old file is in IMG_DIR
+        if old_file_path.resolve().parent != IMG_DIR.resolve():
+            raise HTTPException(status_code=400, detail='Invalid file path')
+        
+        # Check if new filename already exists
+        if new_file_path.exists():
+            raise HTTPException(
+                status_code=409, 
+                detail=f'Filename already exists: {new_filename}. Please choose a different name.'
+            )
+        
+        # Check if new file path is in IMG_DIR
+        if new_file_path.resolve().parent != IMG_DIR.resolve():
+            raise HTTPException(status_code=400, detail='Invalid new file path')
+        
+        # Rename the file
+        old_file_path.rename(new_file_path)
+        log.info(f'User {user.id} renamed image: {filename} -> {new_filename}')
+        
+        return {
+            'status': 'success',
+            'message': 'Image renamed successfully',
+            'old_filename': filename,
+            'new_filename': new_filename,
+            'url': f'/api/v1/images/repository/{new_filename}'
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f'Error renaming image {filename}: {e}')
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get('/ui', response_class=HTMLResponse)
+async def image_repository_ui():
+    """Serve the image repository web UI."""
+    try:
+        html_file = Path(__file__).parent / 'images_ui.html'
+        if html_file.exists():
+            return html_file.read_text(encoding='utf-8')
+        else:
+            raise FileNotFoundError('UI file not found')
+    except Exception as e:
+        log.error(f'Error loading image UI: {e}')
+        raise HTTPException(status_code=500, detail='Failed to load UI')
