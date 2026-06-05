@@ -14,7 +14,7 @@ from urllib.parse import quote, urlparse
 
 import aiohttp
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from open_webui.config import (
     CACHE_DIR,
     IMAGE_AUTO_SIZE_MODELS_REGEX_PATTERN,
@@ -1322,15 +1322,7 @@ async def rename_image_in_repository(filename: str, form_data: RenameImageForm, 
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get('/ui', response_class=HTMLResponse)
+@router.get('/ui')
 async def image_repository_ui():
-    """Serve the image repository web UI."""
-    try:
-        html_file = Path(__file__).parent / 'images_ui.html'
-        if html_file.exists():
-            return html_file.read_text(encoding='utf-8')
-        else:
-            raise FileNotFoundError('UI file not found')
-    except Exception as e:
-        log.error(f'Error loading image UI: {e}')
-        raise HTTPException(status_code=500, detail='Failed to load UI')
+    """Redirect the legacy image repository UI to the Svelte route."""
+    return RedirectResponse(url='/image')
