@@ -218,8 +218,14 @@
 		}
 
 		const id = $page.params.id;
-		if (id && PREDEFINED_CHARACTERS[id]) {
-			persona = PREDEFINED_CHARACTERS[id];
+		if (id) {
+			getCharacterById(localStorage.token, id)
+				.then((data) => {
+					if (data) {
+						persona = data;
+					}
+				})
+				.catch((err) => console.error('Failed to load character', err));
 		}
 	});
 </script>
