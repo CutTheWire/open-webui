@@ -29,10 +29,12 @@
 
 	// Persona
 	let persona = {
+		type: 'character',
 		name: '',
 		gender: '',
 		age: '',
-		details: ''
+		details: '',
+		prompt: ''
 	};
 
 	const PREDEFINED_CHARACTERS: Record<
