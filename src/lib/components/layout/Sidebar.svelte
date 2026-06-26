@@ -93,7 +93,7 @@
 
 	let showCreateFolderModal = false;
 
-	let pinnedModels = [];
+	let pinnedModels: any[] = [];
 
 	let showPinnedModels = false;
 	let showPinnedNotes = false;
@@ -137,6 +137,8 @@
 				);
 			case 'playground':
 				return $user?.role === 'admin';
+			case 'character-chat':
+				return true;
 			default:
 				return false;
 		}
@@ -149,7 +151,12 @@
 			'image-storage': { label: '이미지 저장소', href: '/image', iconType: 'image-storage' },
 			automations: { label: 'Automations', href: '/automations', iconType: 'automations' },
 			calendar: { label: 'Calendar', href: '/calendar', iconType: 'calendar' },
-			playground: { label: 'Playground', href: '/playground', iconType: 'playground' }
+			playground: { label: 'Playground', href: '/playground', iconType: 'playground' },
+			'character-chat': {
+				label: 'Character Chat',
+				href: '/character-chat',
+				iconType: 'character-chat'
+			}
 		};
 		return items[id];
 	};
@@ -752,7 +759,7 @@
 		on:mousedown={() => {
 			showSidebar.set(!$showSidebar);
 		}}
-	/>
+	></div>
 {/if}
 
 <SearchModal
@@ -930,6 +937,22 @@
 											</svg>
 										{:else if itemId === 'playground'}
 											<Code className="size-4.5" />
+										{:else if itemId === 'character-chat'}
+											<!-- Character chat icon -->
+											<svg
+												xmlns="http://www.w3.org/2000/svg"
+												fill="none"
+												viewBox="0 0 24 24"
+												stroke-width="1.5"
+												stroke="currentColor"
+												class="size-4.5"
+											>
+												<path
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													d="M7.5 8.25h9M7.5 12h6m-9 6 3-3h8.25A2.25 2.25 0 0 0 18 12.75V6.75A2.25 2.25 0 0 0 15.75 4.5H6.75A2.25 2.25 0 0 0 4.5 6.75v6.75A2.25 2.25 0 0 0 6.75 15.75H8.25"
+												/>
+											</svg>
 										{/if}
 									</div>
 								</a>
@@ -1181,6 +1204,22 @@
 												</svg>
 											{:else if itemId === 'playground'}
 												<Code className="size-4.5" strokeWidth="2" />
+											{:else if itemId === 'character-chat'}
+												<!-- Character chat icon -->
+												<svg
+													xmlns="http://www.w3.org/2000/svg"
+													fill="none"
+													viewBox="0 0 24 24"
+													stroke-width="2"
+													stroke="currentColor"
+													class="size-4.5"
+												>
+													<path
+														stroke-linecap="round"
+														stroke-linejoin="round"
+														d="M7.5 8.25h9M7.5 12h6m-9 6 3-3h8.25A2.25 2.25 0 0 0 18 12.75V6.75A2.25 2.25 0 0 0 15.75 4.5H6.75A2.25 2.25 0 0 0 4.5 6.75v6.75A2.25 2.25 0 0 0 6.75 15.75H8.25"
+													/>
+												</svg>
 											{/if}
 										</div>
 

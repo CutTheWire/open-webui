@@ -483,6 +483,7 @@ from open_webui.routers import (
     auths,
     automations,
     calendar,
+    character_chat,
     channels,
     chats,
     configs,
@@ -598,6 +599,10 @@ log = logging.getLogger(__name__)
 
 class SPAStaticFiles(StaticFiles):
     async def get_response(self, path: str, scope):
+        # Don't handle API routes - let them pass through to the routers
+        if path.startswith('api/') or path.startswith('ollama') or path.startswith('openai'):
+            raise HTTPException(status_code=404)
+        
         try:
             return await super().get_response(path, scope)
         except (HTTPException, StarletteHTTPException) as ex:
@@ -1429,6 +1434,7 @@ app.include_router(users.router, prefix='/api/v1/users', tags=['users'])
 
 app.include_router(channels.router, prefix='/api/v1/channels', tags=['channels'])
 app.include_router(chats.router, prefix='/api/v1/chats', tags=['chats'])
+app.include_router(character_chat.router, prefix='/api/v1/character-chat', tags=['character-chat'])
 app.include_router(notes.router, prefix='/api/v1/notes', tags=['notes'])
 
 
