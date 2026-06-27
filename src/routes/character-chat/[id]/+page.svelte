@@ -3,8 +3,10 @@
 	import Markdown from '$lib/components/chat/Messages/Markdown.svelte';
 	import ModelSelector from '$lib/components/chat/ModelSelector.svelte';
 	import { models, settings } from '$lib/stores';
+	import { WEBUI_BASE_URL } from '$lib/constants';
 	import { generateOpenAIChatCompletion } from '$lib/apis/openai';
 	import { queryMemory, addNewMemory } from '$lib/apis/memories';
+	import { getCharacterById } from '$lib/apis/character-chat';
 
 	const i18n = getContext('i18n');
 
@@ -16,7 +18,7 @@
 
 	// Settings State
 	let showSettings = false;
-	let activeTab: 'userNote' | 'memoryBook' = 'userNote';
+	let activeTab: 'character' | 'userPersona' | 'userNote' | 'memoryBook' = 'character';
 
 	let selectedModels = [''];
 	let systemPrompt =
@@ -24,6 +26,14 @@
 
 	// User Note
 	let userNote = '';
+
+	// User Persona
+	let userPersona = {
+		name: '',
+		gender: '',
+		age: '',
+		details: ''
+	};
 
 	import { page } from '$app/stores';
 
@@ -34,53 +44,24 @@
 		gender: '',
 		age: '',
 		details: '',
-		prompt: ''
-	};
-
-	const PREDEFINED_CHARACTERS: Record<
-		string,
-		{ name: string; gender: string; age: string; details: string }
-	> = {
-		'1': {
-			name: '들어오면 만지게 해줄게',
-			gender: '여성',
-			age: '20대',
-			details: '사용자를 유혹하는 성격. 거침없는 말투.'
-		},
-		'2': {
-			name: '아카데미는 힘이 곧 매력',
-			gender: '여성',
-			age: '10대',
-			details: '아카데미의 힘을 숭배하는 캐릭터. 무뚝뚝하지만 다정한 말투.'
-		},
-		'3': {
-			name: '언제나 웃는 마을버스 R',
-			gender: '여성',
-			age: '20대',
-			details: '언제나 친절하게 웃는 캐릭터. 상냥한 말투.'
-		},
-		'4': {
-			name: '혼수상태 여동생',
-			gender: '여성',
-			age: '10대',
-			details: '여동생 캐릭터. 소심하지만 오빠를 의지하는 성격.'
-		},
-		'5': {
-			name: '육상부 여신 타락일지',
-			gender: '여성',
-			age: '10대',
-			details: '육상부 에이스. 자신만만하고 활기찬 성격.'
-		},
-		'6': {
-			name: '！우당탕탕！ 콘코르디아 아카데미 U',
-			gender: '여성',
-			age: '10대',
-			details: '활발하고 시끄러운 성격. 장난기 많은 말투.'
-		}
+		prompt: '',
+		imageUrl: ''
 	};
 
 	// Memory Book
 	let useMemoryBook = false;
+
+	function generateId() {
+		try {
+			return crypto.randomUUID();
+		} catch (e) {
+			return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+				const r = (Math.random() * 16) | 0,
+					v = c == 'x' ? r : (r & 0x3) | 0x8;
+				return v.toString(16);
+			});
+		}
+	}
 
 	async function scrollToBottom() {
 		await tick();
@@ -123,7 +104,7 @@
 		messages = [
 			...messages,
 			{
-				id: crypto.randomUUID(),
+				id: generateId(),
 				role: 'user',
 				content: userText
 			}
@@ -137,16 +118,30 @@
 			// Build the comprehensive system prompt
 			let finalSystemPrompt = systemPrompt;
 
-			if (persona.name || persona.details) {
-				finalSystemPrompt += `\n\n[당신의 페르소나 설정]\n`;
-				if (persona.name) finalSystemPrompt += `- 이름: ${persona.name}\n`;
-				if (persona.gender) finalSystemPrompt += `- 성별: ${persona.gender}\n`;
-				if (persona.age) finalSystemPrompt += `- 나이: ${persona.age}\n`;
-				if (persona.details) finalSystemPrompt += `- 세부설정: ${persona.details}\n`;
+			if (persona.type === 'story') {
+				if (persona.prompt) {
+					finalSystemPrompt += `\n\n[스토리 설정]\n${persona.prompt}\n`;
+				}
+			} else {
+				if (persona.name || persona.details) {
+					finalSystemPrompt += `\n\n[당신의 페르소나 설정]\n`;
+					if (persona.name) finalSystemPrompt += `- 이름: ${persona.name}\n`;
+					if (persona.gender) finalSystemPrompt += `- 성별: ${persona.gender}\n`;
+					if (persona.age) finalSystemPrompt += `- 나이: ${persona.age}\n`;
+					if (persona.details) finalSystemPrompt += `- 세부설정: ${persona.details}\n`;
+				}
 			}
 
 			if (userNote.trim()) {
 				finalSystemPrompt += `\n\n[유저 노트 / 특별 지시사항]\n${userNote}`;
+			}
+
+			if (userPersona.name || userPersona.details) {
+				finalSystemPrompt += `\n\n[사용자(당신과 대화하는 상대방)의 페르소나 설정]\n`;
+				if (userPersona.name) finalSystemPrompt += `- 이름: ${userPersona.name}\n`;
+				if (userPersona.gender) finalSystemPrompt += `- 성별: ${userPersona.gender}\n`;
+				if (userPersona.age) finalSystemPrompt += `- 나이: ${userPersona.age}\n`;
+				if (userPersona.details) finalSystemPrompt += `- 세부설정: ${userPersona.details}\n`;
 			}
 
 			if (memoryContext) {
@@ -166,17 +161,28 @@
 				throw new Error('모델이 선택되지 않았습니다.');
 			}
 
-			const response = await generateOpenAIChatCompletion(localStorage.token, {
+			console.log('API Request Body:', {
 				model: modelId,
 				messages: apiMessages
 			});
+
+			const response = await generateOpenAIChatCompletion(
+				localStorage.token,
+				{
+					model: modelId,
+					messages: apiMessages
+				},
+				`${WEBUI_BASE_URL}/openai`
+			);
+
+			console.log('API Response:', response);
 
 			if (response && response.choices && response.choices.length > 0) {
 				const assistantContent = response.choices[0].message.content;
 				messages = [
 					...messages,
 					{
-						id: crypto.randomUUID(),
+						id: generateId(),
 						role: 'assistant',
 						content: assistantContent
 					}
@@ -195,7 +201,7 @@
 			messages = [
 				...messages,
 				{
-					id: crypto.randomUUID(),
+					id: generateId(),
 					role: 'assistant',
 					content: `오류가 발생했습니다: ${error}`
 				}
@@ -215,6 +221,11 @@
 	}
 
 	onMount(() => {
+		if (!localStorage.token) {
+			window.location.href = '/auth';
+			return;
+		}
+
 		if ($settings?.models) {
 			selectedModels = $settings.models;
 		}
@@ -241,6 +252,9 @@
 				{#if persona.name}
 					<h1 class="text-lg font-bold text-gray-900 dark:text-gray-100 mb-1">{persona.name}</h1>
 				{/if}
+				<div class="flex items-center gap-2 mb-1 justify-center max-w-[300px]">
+					<ModelSelector bind:selectedModels showSetDefault={false} />
+				</div>
 				<span class="text-xs font-medium text-gray-500"
 					>이 대화는 AI로 생성된 가상의 이야기입니다</span
 				>
@@ -283,6 +297,18 @@
 							class="flex flex-wrap gap-2 mb-6 border-b border-gray-200 dark:border-gray-700 pb-2"
 						>
 							<button
+								class="px-3 py-2 text-sm font-medium {activeTab === 'character'
+									? 'text-blue-600 border-b-2 border-blue-600'
+									: 'text-gray-500 hover:text-gray-700'}"
+								on:click={() => (activeTab = 'character')}>캐릭터 설정</button
+							>
+							<button
+								class="px-3 py-2 text-sm font-medium {activeTab === 'userPersona'
+									? 'text-blue-600 border-b-2 border-blue-600'
+									: 'text-gray-500 hover:text-gray-700'}"
+								on:click={() => (activeTab = 'userPersona')}>내 페르소나</button
+							>
+							<button
 								class="px-3 py-2 text-sm font-medium {activeTab === 'userNote'
 									? 'text-blue-600 border-b-2 border-blue-600'
 									: 'text-gray-500 hover:text-gray-700'}"
@@ -297,11 +323,59 @@
 						</div>
 
 						<div class="min-h-[200px]">
-							{#if activeTab === 'userNote'}
+							{#if activeTab === 'character'}
+								<div class="flex flex-col gap-4">
+									<div>
+										<div class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+											대화 모델 선택
+										</div>
+										<div class="flex items-center gap-2 mb-4">
+											<ModelSelector bind:selectedModels showSetDefault={false} />
+										</div>
+									</div>
+
+									<div>
+										<div class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+											캐릭터 페르소나 (읽기 전용)
+										</div>
+										<p class="text-xs text-gray-500 mb-3">
+											이 캐릭터의 설정 정보입니다. 채팅방에서는 수정할 수 없습니다.
+										</p>
+										<div
+											class="w-full bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-xl px-4 py-3 text-sm text-gray-600 dark:text-gray-400"
+										>
+											{#if persona.imageUrl}
+												<div class="mb-4 flex justify-center">
+													<img
+														src={persona.imageUrl}
+														alt={persona.name}
+														class="w-32 h-32 object-cover rounded-lg shadow-sm"
+													/>
+												</div>
+											{/if}
+											{#if persona.name}
+												<p><strong>이름:</strong> {persona.name}</p>
+											{/if}
+											{#if persona.gender}
+												<p><strong>성별:</strong> {persona.gender}</p>
+											{/if}
+											{#if persona.age}
+												<p><strong>나이:</strong> {persona.age}</p>
+											{/if}
+											{#if persona.details}
+												<p class="mt-2 whitespace-pre-wrap"><strong>세부설정:</strong> {persona.details}</p>
+											{/if}
+											{#if persona.prompt && persona.type === 'story'}
+												<p class="mt-2 whitespace-pre-wrap"><strong>스토리라인:</strong> {persona.prompt}</p>
+											{/if}
+										</div>
+									</div>
+								</div>
+							{:else if activeTab === 'userNote'}
 								<div>
-									<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+									<div class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
 										유저노트 (특별 지시문)
-									</label>
+									</div>
 									<p class="text-xs text-gray-500 mb-3">
 										AI가 대화 중에 항상 참고해야 할 특별한 규칙이나 지시사항을 작성하세요.
 									</p>
@@ -312,14 +386,65 @@
 										placeholder="예: 항상 3줄 이내로 짧게 대답해. 나를 '마스터'라고 불러."
 									></textarea>
 								</div>
+							{:else if activeTab === 'userPersona'}
+								<div class="flex flex-col gap-4">
+									<div>
+										<div class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+											나의 페르소나 설정
+										</div>
+										<p class="text-xs text-gray-500 mb-3">
+											캐릭터가 당신을 인식할 때 참고할 당신의 이름, 성별, 나이, 세부 설정을 입력하세요.
+										</p>
+									</div>
+
+									<div class="grid grid-cols-3 gap-3">
+										<div>
+											<div class="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">이름</div>
+											<input
+												type="text"
+												bind:value={userPersona.name}
+												class="w-full bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-xl px-3 py-2 text-sm outline-none text-gray-900 dark:text-gray-100"
+												placeholder="홍길동"
+											/>
+										</div>
+										<div>
+											<div class="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">성별</div>
+											<input
+												type="text"
+												bind:value={userPersona.gender}
+												class="w-full bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-xl px-3 py-2 text-sm outline-none text-gray-900 dark:text-gray-100"
+												placeholder="남성"
+											/>
+										</div>
+										<div>
+											<div class="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">나이</div>
+											<input
+												type="text"
+												bind:value={userPersona.age}
+												class="w-full bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-xl px-3 py-2 text-sm outline-none text-gray-900 dark:text-gray-100"
+												placeholder="20대"
+											/>
+										</div>
+									</div>
+
+									<div>
+										<div class="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">세부 설정 및 관계</div>
+										<textarea
+											bind:value={userPersona.details}
+											rows="4"
+											class="w-full bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-xl px-4 py-3 text-sm outline-none resize-y text-gray-900 dark:text-gray-100"
+											placeholder="예: 캐릭터의 친오빠이며, 무뚝뚝하지만 여동생을 아끼는 성격입니다."
+										></textarea>
+									</div>
+								</div>
 							{:else if activeTab === 'memoryBook'}
 								<div>
 									<div
 										class="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-xl bg-gray-50 dark:bg-gray-800"
 									>
 										<div>
-											<label class="font-medium text-gray-900 dark:text-gray-100 block"
-												>메모리북 활성화</label
+											<div class="font-medium text-gray-900 dark:text-gray-100 block"
+												>메모리북 활성화</div
 											>
 											<span class="text-xs text-gray-500"
 												>대화 내용을 벡터 DB에 기록하고, 필요할 때 관련된 기억을 꺼내어 LLM에게

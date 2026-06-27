@@ -77,7 +77,7 @@
 	import HotkeyHint from '../common/HotkeyHint.svelte';
 
 	const BREAKPOINT = 768;
-	const DEFAULT_PINNED_ITEMS = ['notes', 'workspace', 'image-storage'];
+	const DEFAULT_PINNED_ITEMS = ['notes', 'workspace', 'image-storage', 'character-chat'];
 
 	let scrollTop = 0;
 

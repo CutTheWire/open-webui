@@ -101,7 +101,7 @@ isLoading = false;
 </div>
 
 <div>
-<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{type === 'character' ? '캐릭터 이름' : '스토리 제목'} *</label>
+<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{#if type === 'character'}캐릭터 이름{:else}스토리 제목{/if} *</label>
 <input type="text" bind:value={name} class="w-full bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2.5 text-gray-900 dark:text-gray-100" placeholder={type === 'character' ? '캐릭터의 이름을 입력하세요' : '스토리 제목을 입력하세요'}>
 </div>
 
